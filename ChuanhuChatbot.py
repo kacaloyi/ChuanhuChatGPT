@@ -1,12 +1,16 @@
+#现在可以尝试ChatGPT
+
 import json
 import gradio as gr
 import openai
 import os
 import sys
 import traceback
+
+
 # import markdown
 
-my_api_key = ""    # 在这里输入你的 API 密钥
+my_api_key = "sk-xxx"    # 在这里输入你的 API 密钥
 initial_prompt = "You are a helpful assistant."
 
 if my_api_key == "":
@@ -15,6 +19,16 @@ if my_api_key == "":
 if my_api_key == "empty":
     print("Please give a api key!")
     sys.exit(1)
+
+initial_keytxt = ""
+'''
+if my_api_key == "":
+    initial_keytxt = None
+elif len(str(my_api_key)) == 51:
+    initial_keytxt = "默认api-key（未验证）：" + str(my_api_key[:4] + "..." + my_api_key[-4:])
+else:
+    initial_keytxt = "默认api-key无效，请重新输入"
+'''
 
 def parse_text(text):
     lines = text.split("\n")
@@ -33,6 +47,7 @@ def parse_text(text):
     return "".join(lines)
 
 def get_response(system, context, myKey, raw = False):
+    global  initial_keytxt
     openai.api_key = myKey
     response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
@@ -45,7 +60,11 @@ def get_response(system, context, myKey, raw = False):
         statistics = f'本次对话Tokens用量【{response["usage"]["total_tokens"]} / 4096】 （ 提问+上文 {response["usage"]["prompt_tokens"]}，回答 {response["usage"]["completion_tokens"]} ）'
         message = response["choices"][0]["message"]["content"]
 
-        message_with_stats = f'{message}\n\n================\n\n{statistics}'
+        initial_keytxt = statistics
+
+
+        message_with_stats = f'{message}'
+        #\n\n================\n\n{statistics}'
         # message_with_stats = markdown.markdown(message_with_stats)
 
         return message, parse_text(message_with_stats)
@@ -57,24 +76,51 @@ def predict(chatbot, input_sentence, system, context, myKey):
 
     try:
         message, message_with_stats = get_response(system, context, myKey)
-    except:
+    except openai.error.AuthenticationError:
         chatbot.append((input_sentence, "请求失败，请检查API-key是否正确。"))
+        return chatbot, context
+    except openai.error.Timeout:
+        chatbot.append((input_sentence, "请求超时，请检查网络连接。"))
+        return chatbot, context
+    except openai.error.APIConnectionError:
+        chatbot.append((input_sentence, "连接失败，请检查网络连接。"))
+        return chatbot, context
+    except openai.error.RateLimitError:
+        chatbot.append((input_sentence, "请求过于频繁，请5s后再试。"))
+        return chatbot, context
+    except:
+        chatbot.append((input_sentence, "predict发生了未知错误Orz"))
         return chatbot, context
 
     context.append({"role": "assistant", "content": message})
 
     chatbot.append((input_sentence, message_with_stats))
 
+
     return chatbot, context
 
 def retry(chatbot, system, context, myKey):
     if len(context) == 0:
         return [], []
+    
     try:
         message, message_with_stats = get_response(system, context[:-1], myKey)
-    except:
+    except openai.error.AuthenticationError:
         chatbot.append(("重试请求", "请求失败，请检查API-key是否正确。"))
         return chatbot, context
+    except openai.error.Timeout:
+        chatbot.append(("重试请求", "请求超时，请检查网络连接。"))
+        return chatbot, context
+    except openai.error.APIConnectionError:
+        chatbot.append(("重试请求", "连接失败，请检查网络连接。"))
+        return chatbot, context
+    except openai.error.RateLimitError:
+        chatbot.append(("重试请求", "请求过于频繁，请5s后再试。"))
+        return chatbot, context
+    except:
+        chatbot.append(("重试请求", "retry发生了未知错误Orz"))
+        return chatbot, context
+    
     context[-1] = {"role": "assistant", "content": message}
 
     chatbot[-1] = (context[-2]["content"], message_with_stats)
@@ -131,27 +177,34 @@ def update_system(new_system_prompt):
 
 def set_apikey(new_api_key, myKey):
     old_api_key = myKey
+    
     try:
         get_response(update_system(initial_prompt), [{"role": "user", "content": "test"}], new_api_key)
-    except:
-        traceback.print_exc()
-        print("API key校验失败，请检查API key是否正确，或者检查网络是否畅通。")
+    except openai.error.AuthenticationError:
         return "无效的api-key", myKey
+    except openai.error.Timeout:
+        return "请求超时，请检查网络设置", myKey
+    except openai.error.APIConnectionError:
+        return "网络错误", myKey
+    except:
+        return "set_apikey发生了未知错误Orz", myKey
+    
     encryption_str = "验证成功，api-key已做遮挡处理：" + new_api_key[:4] + "..." + new_api_key[-4:]
     return encryption_str, new_api_key
 
 
 with gr.Blocks() as demo:
-    keyTxt = gr.Textbox(show_label=True, placeholder=f"在这里输入你的API-key...", value=str(my_api_key[:4] + "..." + my_api_key[-4:]), label="API Key").style(container=True)
     chatbot = gr.Chatbot().style(color_map=("#1D51EE", "#585A5B"))
+    
     context = gr.State([])
+   
     systemPrompt = gr.State(update_system(initial_prompt))
     myKey = gr.State(my_api_key)
     topic = gr.State("未命名对话历史记录")
 
     with gr.Row():
         with gr.Column(scale=12):
-            txt = gr.Textbox(show_label=False, placeholder="在这里输入").style(container=False)
+            txt = gr.Textbox(show_label=False, placeholder="在这里提问").style(container=False)
         with gr.Column(min_width=50, scale=1):
             submitBtn = gr.Button("🚀", variant="primary")
     with gr.Row():
@@ -159,7 +212,9 @@ with gr.Blocks() as demo:
         retryBtn = gr.Button("🔄 重新生成")
         delLastBtn = gr.Button("🗑️ 删除上条对话")
         reduceTokenBtn = gr.Button("♻️ 优化Tokens")
-    newSystemPrompt = gr.Textbox(show_label=True, placeholder=f"在这里输入新的System Prompt...", label="更改 System prompt").style(container=True)
+
+    keyTxt = gr.Textbox(show_label=True, placeholder=f"", value=initial_keytxt,interactive=False, label="简报").style(container=True)
+    newSystemPrompt = gr.Textbox(show_label=True, placeholder=f"在这里修改System Prompt...", label="修改System prompt（改变ChatGPT的角色）").style(container=True)
     systemPromptDisplay = gr.Textbox(show_label=True, value=initial_prompt, interactive=False, label="目前的 System prompt").style(container=True)
     with gr.Accordion(label="保存/加载对话历史记录(在文本框中输入文件名，点击“保存对话”按钮，历史记录文件会被存储到本地)", open=False):
         with gr.Column():
@@ -181,9 +236,13 @@ with gr.Blocks() as demo:
     retryBtn.click(retry, [chatbot, systemPrompt, context, myKey], [chatbot, context], show_progress=True)
     delLastBtn.click(delete_last_conversation, [chatbot, context], [chatbot, context], show_progress=True)
     reduceTokenBtn.click(reduce_token, [chatbot, systemPrompt, context, myKey], [chatbot, context], show_progress=True)
-    keyTxt.submit(set_apikey, [keyTxt, myKey], [keyTxt, myKey], show_progress=True)
+    #keyTxt.submit(set_apikey, [keyTxt, myKey], [keyTxt, myKey], show_progress=True)
     uploadBtn.upload(load_chat_history, uploadBtn, [chatbot, systemPrompt, context, systemPromptDisplay], show_progress=True)
     saveBtn.click(save_chat_history, [saveFileName, systemPrompt, context], None, show_progress=True)
 
 
-demo.launch()
+demo.launch(inline = True)
+#interface.launch(inline=True)
+#demo.launch(server_name="127.0.0.1", server_port=8808)
+#也可以尝试在launch函数中设置参数share=True，这时会得到一个公共网址，
+#诸如http://xxxx.gradio.app，我们就可以把自己搭建的以图搜图服务分享给小伙伴啦。
