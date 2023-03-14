@@ -241,7 +241,7 @@ with gr.Blocks() as demo:
     saveBtn.click(save_chat_history, [saveFileName, systemPrompt, context], None, show_progress=True)
 
 
-demo.launch(inline = True)
+demo.launch(inline = True,share=True,debug=True )
 #interface.launch(inline=True)
 #demo.launch(server_name="127.0.0.1", server_port=8808)
 #也可以尝试在launch函数中设置参数share=True，这时会得到一个公共网址，
