@@ -78,7 +78,7 @@
         "\n",
         "# import markdown\n",
         "\n",
-        "my_api_key = \"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\"    # 在这里输入你的 API 密钥\n",
+        "my_api_key = \"sk-xxxxxxx\"    # 在这里输入你的 API 密钥\n",
         "initial_prompt = \"You are a helpful assistant.\"\n",
         "\n",
         "if my_api_key == \"\":\n",
